@@ -18,4 +18,5 @@ Gem::Specification.new do |gem|
     gem.add_development_dependency "test-unit"
     gem.add_runtime_dependency "fluentd", [">= 0.14.15", "< 2"]
     gem.add_runtime_dependency "redis"
+    gem.add_runtime_dependency "redis_cluster"
 end

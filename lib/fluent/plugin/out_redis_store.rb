@@ -9,9 +9,10 @@ module Fluent::Plugin
     DEFAULT_BUFFER_TYPE = "memory"
 
     # redis connection
-    config_param :host,      :string,  :default => '127.0.0.1'
+    config_param :host,      :string,  :default => nil
     config_param :port,      :integer, :default => 6379
     config_param :path,      :string,  :default => nil
+    config_param :addresses, :string,  :default => nil
     config_param :password,  :string,  :default => nil
     config_param :db,        :integer, :default => 0
     config_param :timeout,   :float,   :default => 5.0
@@ -39,6 +40,7 @@ module Fluent::Plugin
     def initialize
       super
       require 'redis' unless defined?(Redis) == 'constant'
+      require 'redis_cluster' unless defined?(RedisCluster) == 'constant'
       require 'msgpack'
     end
 
@@ -53,17 +55,30 @@ module Fluent::Plugin
 
     def start
       super
+
       if @path
+        @cluster_mode = false
+
         @redis = Redis.new(:path => @path, :password => @password,
                            :timeout => @timeout, :thread_safe => true, :db => @db)
-      else
+      elsif @host
+        @cluster_mode = false
+
         @redis = Redis.new(:host => @host, :port => @port, :password => @password,
                            :timeout => @timeout, :thread_safe => true, :db => @db)
+      else
+        @cluster_mode = true
+
+        addresses = @addresses.split(',').map { |str|
+          parts = str.split(':')
+          { host: parts[0].strip, port: parts[1].strip }
+        }
+        @redis = RedisCluster.new(addresses, timeout: @timeout)
       end
     end
 
     def shutdown
-      @redis.quit
+      @redis.close
       super
     end
 
@@ -134,7 +149,11 @@ module Fluent::Plugin
       end
       if 0 < @value_length
         script = generate_zremrangebyrank_script(key, @value_length, @order)
-        @redis.eval script
+        if @cluster_mode
+          @redis.eval(script, [key])
+        else
+          @redis.eval script
+        end
       end
     end
 
@@ -157,7 +176,11 @@ module Fluent::Plugin
       set_key_expire key
       if 0 < @value_length
         script = generate_ltrim_script(key, @value_length, @order)
-        @redis.eval script
+        if @cluster_mode
+          @redis.eval(script, [key])
+        else
+          @redis.eval script
+        end
       end
     end
 
